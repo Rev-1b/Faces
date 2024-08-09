@@ -1,7 +1,7 @@
 import os
 import tempfile
 import uuid
-
+import shutil
 import cv2
 import face_recognition
 from pytubefix import YouTube
@@ -31,7 +31,7 @@ def download_video(url):
     return temp_file.name
 
 
-def get_video(video_folder):
+def get_video(folder):
     is_video_normal = {'1': True, '2': False}[_input('Выбери тип видео (1 - обычное, 2 - дипфейк): ')]
     is_youtube_video = {'1': True, '2': False}[
         _input('Выбери 1 для обработки ютуб видео, 2 для обработки заранее загруженного видео: ')]
@@ -40,18 +40,15 @@ def get_video(video_folder):
         link = f"https://www.youtube.com/watch?v={input('Ссылка на видео: https://www.youtube.com/watch?v=')}"
         path_to_video = download_video(link)
     else:
-        path_to_video = input(f'Введи название видео в папке {video_folder}:')
+        path_to_video = input(f'Введи название видео в папке {folder}:')
     return {'path': path_to_video, 'is_video_normal': is_video_normal}
 
 
-def extract_faces_from_video(video_path, output_folder, csv_file, is_normal):
+def extract_faces_from_video(video_path, output_folder, temp_csv_file, is_normal):
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
 
-    if os.path.exists(csv_file):
-        df = pd.read_csv(csv_file)
-    else:
-        df = pd.DataFrame(columns=["filename", "is_normal"])
+    df = pd.DataFrame(columns=["filename", "is_normal"])
 
     video_capture = cv2.VideoCapture(video_path)
     frame_number = 0
@@ -77,17 +74,56 @@ def extract_faces_from_video(video_path, output_folder, csv_file, is_normal):
         frame_number += 1
         print(f"Processed frames: {frame_number}, Found faces: {face_count}")
 
-    df.to_csv(csv_file, index=False)
+    df.to_csv(temp_csv_file, index=False)
     video_capture.release()
     print("Video processing complete")
+
+
+def cleanup_faces(temp_csv_file, raw_faces_folder, permanent_csv_file, result_folder):
+    # Загружаем данные из временного CSV файла
+    df = pd.read_csv(temp_csv_file)
+
+    # Удаляем записи из CSV файла для которых нет соответствующих изображений
+    df = df[df['filename'].apply(lambda x: os.path.exists(x))]
+
+    # Перемещаем оставшиеся файлы в папку result
+    if not os.path.exists(result_folder):
+        os.makedirs(result_folder)
+
+    for filename in df['filename']:
+        shutil.move(filename, os.path.join(result_folder, os.path.basename(filename)))
+
+    # Добавляем данные из временного CSV в основной
+    if os.path.exists(permanent_csv_file):
+        df_permanent = pd.read_csv(permanent_csv_file)
+        df_permanent = pd.concat([df_permanent, df], ignore_index=True)
+    else:
+        df_permanent = df
+
+    # Сохраняем обновленный основной CSV файл
+    df_permanent.to_csv(permanent_csv_file, index=False)
+
+    # Удаляем временный CSV файл
+    os.remove(temp_csv_file)
+    print("Cleanup and file transfer complete")
 
 
 if __name__ == "__main__":
     while True:
         video_folder = 'downloaded_video'
-        output_folder = "raw_faces"
-        csv_file = "faces.csv"
+        raw_faces_folder = "raw_faces"
+        result_folder = "result_faces"
+        permanent_csv_file = "faces.csv"
+
+        # Для каждого видео создается временный CSV файл
+        temp_csv_file = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4()}.csv")
 
         path, is_video_normal = get_video(video_folder).values()
-        extract_faces_from_video(path, output_folder, csv_file, is_video_normal)
+        extract_faces_from_video(path, raw_faces_folder, temp_csv_file, is_video_normal)
         os.remove(path)
+
+        # Ожидание удаления файлов вручную
+        input("Удалите ненужные изображения из папки raw_faces и нажмите Enter для продолжения...")
+
+        # Очистка временного CSV и перемещение оставшихся изображений в result_faces
+        cleanup_faces(temp_csv_file, raw_faces_folder, permanent_csv_file, result_folder)
