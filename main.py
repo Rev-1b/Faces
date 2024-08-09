@@ -95,25 +95,25 @@ def extract_faces_from_video(video_path, output_folder, temp_csv, is_normal):
     print("Обработка видео завершена.")
 
 
-def cleanup_faces(temp_csv, raw_faces_folder, permanent_csv_file, result_folder):
+def cleanup_faces(temp_csv_file, raw_faces_folder, permanent_csv_file, result_folder):
     """
-    Функция для очистки временной папки с лицами, удаления записей из временного CSV
-    и переноса изображений в результирующую папку.
+    Функция для очистки временной папки с лицами, удаления записей из временного CSV и переноса изображений в результирующую папку.
     """
-    # Загружаем данные из временного CSV файла
-    df = pd.read_csv(temp_csv)
 
-    # Удаляем записи для изображений, которых нет в папке raw_faces
-    df = df[df['filename'].apply(lambda x: os.path.exists(x))]
+    # Загружаем данные из временного CSV файла
+    df = pd.read_csv(temp_csv_file)
+
+    # Фильтрация: оставляем только те файлы, которые существуют
+    df = df[df['filename'].apply(lambda x: os.path.exists(os.path.join(raw_faces_folder, x)))]
 
     # Перемещаем оставшиеся файлы в папку result
     if not os.path.exists(result_folder):
         os.makedirs(result_folder)
 
     for filename in df['filename']:
-        shutil.move(filename, os.path.join(result_folder, os.path.basename(filename)))
+        shutil.move(os.path.join(raw_faces_folder, filename), os.path.join(result_folder, filename))
 
-    # Добавляем данные из временного CSV в основной
+    # Обновляем основной CSV файл
     if os.path.exists(permanent_csv_file):
         df_permanent = pd.read_csv(permanent_csv_file)
         df_permanent = pd.concat([df_permanent, df], ignore_index=True)
@@ -124,7 +124,7 @@ def cleanup_faces(temp_csv, raw_faces_folder, permanent_csv_file, result_folder)
     df_permanent.to_csv(permanent_csv_file, index=False)
 
     # Удаляем временный CSV файл
-    os.remove(temp_csv)
+    os.remove(temp_csv_file)
     print("Очистка и перенос файлов завершены.")
 
 
