@@ -30,13 +30,25 @@ def show_progress(stream, chunk, bytes_remaining):
     print(f"\rЗагрузка видео {bytes_downloaded}/{total_size} байт: {completion_percentage:.2f}%", end="", flush=True)
 
 
-def download_video(youtube_url):
+def download_video(youtube_url, resolution='480p'):
     """
-    Функция для загрузки видео с YouTube.
-    Возвращает путь к загруженному видеофайлу.
+    Функция для загрузки только видео с YouTube (без звука).
+    Возвращает путь к загруженному видео файлу.
     """
     yt = YouTube(youtube_url, on_progress_callback=show_progress)
-    video_stream = yt.streams.filter(progressive=True, file_extension='mp4').first()
+
+    # Ищем адаптивный видеопоток без аудио, с заданным разрешением
+    video_stream = yt.streams.filter(adaptive=True, type="video", resolution=resolution, file_extension='mp4').first()
+
+    if video_stream is None:
+        # Пробуем выбрать адаптивный поток с другим доступным разрешением
+        print('Неподходящее разрешение, пробую другое')
+        video_stream = yt.streams.filter(adaptive=True, type="video", resolution='360p', file_extension='mp4').first()
+
+    if video_stream is None:
+        raise ValueError("Не удалось найти видеопоток без звука на YouTube.")
+
+    print(f"Выбран поток с разрешением: {video_stream.resolution}")
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
     video_stream.download(output_path=os.path.dirname(temp_file.name), filename=os.path.basename(temp_file.name))
     print("\nЗагрузка завершена!")
@@ -54,6 +66,7 @@ def get_video(video_dir):
 
     if is_youtube_video:
         youtube_link = input('Ссылка на видео: ')
+        # youtube_link = 'https://youtu.be/Z54FdjHqPgM?si=WttLybEL3ac0kUls'
         d_video_path = download_video(youtube_link)
     else:
         video_filename = input(f'Введи название видео в папке {video_dir}: ')
@@ -158,14 +171,19 @@ if __name__ == "__main__":
         temp_csv_file = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4()}.csv")
 
         # Получение видео и обработка
-        video_path, is_video_normal = get_video(video_directory).values()
-        extract_faces_from_video(video_path, raw_faces_directory, temp_csv_file, is_video_normal)
-        os.remove(video_path)
+        try:
+            video_path, is_video_normal = get_video(video_directory).values()
+            extract_faces_from_video(video_path, raw_faces_directory, temp_csv_file, is_video_normal)
+            os.remove(video_path)
 
-        open_folder(raw_faces_directory)
+            open_folder(raw_faces_directory)
 
-        # Ожидание удаления файлов вручную
-        input("Удалите ненужные изображения из папки raw_faces и нажмите Enter для продолжения...")
+            # Ожидание удаления файлов вручную
+            input("Удалите ненужные изображения из папки raw_faces и нажмите Enter для продолжения...")
 
-        # Очистка временного CSV и перемещение оставшихся изображений в result_faces
-        cleanup_faces(temp_csv_file, raw_faces_directory, permanent_csv_file, result_faces_directory)
+            # Очистка временного CSV и перемещение оставшихся изображений в result_faces
+            cleanup_faces(temp_csv_file, raw_faces_directory, permanent_csv_file, result_faces_directory)
+        except Exception as err:
+            print(err)
+        finally:
+            print('Начинаем сначала')
