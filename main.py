@@ -1,21 +1,23 @@
 import os
+import platform
+import shutil
 import tempfile
 import uuid
-import shutil
+
 import cv2
 import face_recognition
-from pytubefix import YouTube
 import pandas as pd
+from pytubefix import YouTube
 
 
 def _input(message):
     """
     Функция для ввода и валидации данных.
     """
-    res = input(message)
-    while res not in ['1', '2']:
-        res = input('Ввод не верен, выбери 1 или 2: ')
-    return res
+    user_input = input(message)
+    while user_input not in ['1', '2']:
+        user_input = input('Ввод не верен, выбери 1 или 2: ')
+    return user_input
 
 
 def show_progress(stream, chunk, bytes_remaining):
@@ -24,51 +26,52 @@ def show_progress(stream, chunk, bytes_remaining):
     """
     total_size = stream.filesize
     bytes_downloaded = total_size - bytes_remaining
-    percentage_of_completion = bytes_downloaded / total_size * 100
-    print(f"\rЗагрузка видео {bytes_downloaded}/{total_size} байт: {percentage_of_completion:.2f}%", end="", flush=True)
+    completion_percentage = bytes_downloaded / total_size * 100
+    print(f"\rЗагрузка видео {bytes_downloaded}/{total_size} байт: {completion_percentage:.2f}%", end="", flush=True)
 
 
-def download_video(url):
+def download_video(youtube_url):
     """
     Функция для загрузки видео с YouTube.
     Возвращает путь к загруженному видеофайлу.
     """
-    yt = YouTube(url, on_progress_callback=show_progress)
-    stream = yt.streams.filter(progressive=True, file_extension='mp4').first()
+    yt = YouTube(youtube_url, on_progress_callback=show_progress)
+    video_stream = yt.streams.filter(progressive=True, file_extension='mp4').first()
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
-    stream.download(output_path=os.path.dirname(temp_file.name), filename=os.path.basename(temp_file.name))
+    video_stream.download(output_path=os.path.dirname(temp_file.name), filename=os.path.basename(temp_file.name))
     print("\nЗагрузка завершена!")
     return temp_file.name
 
 
-def get_video(folder):
+def get_video(video_dir):
     """
     Функция для выбора типа видео и его получения, либо с YouTube, либо из локальной папки.
     Возвращает путь к видео и тип видео (обычное или дипфейк).
     """
-    is_video_normal = {'1': True, '2': False}[_input('Выбери тип видео (1 - обычное, 2 - дипфейк): ')]
+    is_normal_video = {'1': True, '2': False}[_input('Выбери тип видео (1 - обычное, 2 - дипфейк): ')]
     is_youtube_video = {'1': True, '2': False}[
         _input('Выбери 1 для обработки видео с YouTube, 2 для обработки заранее загруженного видео: ')]
 
     if is_youtube_video:
-        link = f"https://www.youtube.com/watch?v={input('Ссылка на видео: https://www.youtube.com/watch?v=')}"
-        path_to_video = download_video(link)
+        youtube_link = input('Ссылка на видео: ')
+        d_video_path = download_video(youtube_link)
     else:
-        path_to_video = os.path.join(folder, input(f'Введи название видео в папке {folder}: '))
-    return {'path': path_to_video, 'is_video_normal': is_video_normal}
+        video_filename = input(f'Введи название видео в папке {video_dir}: ')
+        d_video_path = os.path.join(video_dir, video_filename)
+    return {'path': d_video_path, 'is_video_normal': is_normal_video}
 
 
-def extract_faces_from_video(video_path, output_folder, temp_csv, is_normal):
+def extract_faces_from_video(video_file, output_dir, temp_csv_path, is_normal_video):
     """
     Функция для извлечения лиц из видео и сохранения их во временной папке и временном CSV файле.
     """
-    if not os.path.exists(output_folder):
-        os.makedirs(output_folder)
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
 
-    df = pd.DataFrame(columns=["filename", "is_normal"])
+    faces_df = pd.DataFrame(columns=["filename", "is_normal"])
 
-    video_capture = cv2.VideoCapture(video_path)
-    frame_number, face_count = 0, 0
+    video_capture = cv2.VideoCapture(video_file)
+    frame_count, total_faces = 0, 0
 
     while True:
         ret, frame = video_capture.read()
@@ -82,56 +85,72 @@ def extract_faces_from_video(video_path, output_folder, temp_csv, is_normal):
         for face_location in face_locations:
             top, right, bottom, left = face_location
             face_image = frame[top:bottom, left:right]
-            face_filename = os.path.join(output_folder, f"{uuid.uuid4()}.jpg")
-            cv2.imwrite(face_filename, face_image)
-            df = pd.concat([df, pd.DataFrame({"filename": [face_filename], "is_normal": [is_normal]})])
-            face_count += 1
+            face_filename = f"{uuid.uuid4()}.jpg"
+            cv2.imwrite(os.path.join(output_dir, face_filename), face_image)
+            faces_df = pd.concat(
+                [faces_df, pd.DataFrame({"filename": [face_filename], "is_normal": [is_normal_video]})])
+            total_faces += 1
 
-        frame_number += 1
-        print(f"Обработано кадров: {frame_number}, Найдено лиц: {face_count}")
+        frame_count += 1
+        print(f"Обработано кадров: {frame_count}, Найдено лиц: {total_faces}")
 
-    df.to_csv(temp_csv, index=False)
+    faces_df.to_csv(temp_csv_path, index=False)
     video_capture.release()
     print("Обработка видео завершена.")
 
 
-def cleanup_faces(temp_csv_file, raw_faces_folder, permanent_csv_file, result_folder):
+def cleanup_faces(temp_csv, raw_faces_dir, final_csv, result_dir):
     """
-    Функция для очистки временной папки с лицами, удаления записей из временного CSV и переноса изображений в результирующую папку.
+    Функция для очистки временной папки с лицами, удаления записей из временного CSV и
+    переноса изображений в результирующую папку.
     """
-
     # Загружаем данные из временного CSV файла
-    df = pd.read_csv(temp_csv_file)
+    temp_faces_df = pd.read_csv(temp_csv)
 
     # Фильтрация: оставляем только те файлы, которые существуют
-    df = df[df['filename'].apply(lambda x: os.path.exists(os.path.join(raw_faces_folder, x)))]
+    temp_faces_df = temp_faces_df[
+        temp_faces_df['filename'].apply(lambda x: os.path.exists(os.path.join(raw_faces_dir, x)))]
 
     # Перемещаем оставшиеся файлы в папку result
-    if not os.path.exists(result_folder):
-        os.makedirs(result_folder)
+    if not os.path.exists(result_dir):
+        os.makedirs(result_dir)
 
-    for filename in df['filename']:
-        shutil.move(os.path.join(raw_faces_folder, filename), os.path.join(result_folder, filename))
+    for face_file in temp_faces_df['filename']:
+        shutil.move(os.path.join(raw_faces_dir, face_file), os.path.join(result_dir, face_file))
 
     # Обновляем основной CSV файл
-    if os.path.exists(permanent_csv_file):
-        df_permanent = pd.read_csv(permanent_csv_file)
-        df_permanent = pd.concat([df_permanent, df], ignore_index=True)
+    if os.path.exists(final_csv):
+        permanent_faces_df = pd.read_csv(final_csv)
+        permanent_faces_df = pd.concat([permanent_faces_df, temp_faces_df], ignore_index=True)
     else:
-        df_permanent = df
+        permanent_faces_df = temp_faces_df
 
     # Сохраняем обновленный основной CSV файл
-    df_permanent.to_csv(permanent_csv_file, index=False)
+    permanent_faces_df.to_csv(final_csv, index=False)
 
     # Удаляем временный CSV файл
-    os.remove(temp_csv_file)
+    os.remove(temp_csv)
     print("Очистка и перенос файлов завершены.")
 
 
+def open_folder(path):
+    """
+    Функция для открытия проводника в указанной папке.
+    """
+    if platform.system() == "Windows":
+        os.startfile(path)
+    elif platform.system() == "Darwin":  # macOS
+        os.system(f"open {path}")
+    elif platform.system() == "Linux":
+        os.system(f"xdg-open {path}")
+    else:
+        print(f"Операционная система {platform.system()} не поддерживается.")
+
+
 if __name__ == "__main__":
-    video_folder = 'downloaded_video'
-    raw_faces_folder = "raw_faces"
-    result_folder = "result_faces"
+    video_directory = 'downloaded_video'
+    raw_faces_directory = "raw_faces"
+    result_faces_directory = "result_faces"
     permanent_csv_file = "faces.csv"
 
     while True:
@@ -139,12 +158,14 @@ if __name__ == "__main__":
         temp_csv_file = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4()}.csv")
 
         # Получение видео и обработка
-        path, is_video_normal = get_video(video_folder).values()
-        extract_faces_from_video(path, raw_faces_folder, temp_csv_file, is_video_normal)
-        os.remove(path)
+        video_path, is_video_normal = get_video(video_directory).values()
+        extract_faces_from_video(video_path, raw_faces_directory, temp_csv_file, is_video_normal)
+        os.remove(video_path)
+
+        open_folder(raw_faces_directory)
 
         # Ожидание удаления файлов вручную
         input("Удалите ненужные изображения из папки raw_faces и нажмите Enter для продолжения...")
 
         # Очистка временного CSV и перемещение оставшихся изображений в result_faces
-        cleanup_faces(temp_csv_file, raw_faces_folder, permanent_csv_file, result_folder)
+        cleanup_faces(temp_csv_file, raw_faces_directory, permanent_csv_file, result_faces_directory)
