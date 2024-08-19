@@ -9,6 +9,10 @@ import cv2
 import face_recognition
 import pandas as pd
 from pytubefix import YouTube
+from collections import namedtuple
+
+
+Video = namedtuple('Video', ['path', 'name'])
 
 
 class VideoDownloader:
@@ -51,7 +55,7 @@ class YouTubeVideoDownloader(VideoDownloader):
         output_path = os.path.join(self.output_dir, video_filename)
         video_stream.download(output_path=self.output_dir, filename=video_filename)
         print("\nЗагрузка завершена!")
-        return output_path
+        return Video(output_path, video_filename)
 
 
 class LocalVideoDownloader(VideoDownloader):
@@ -63,14 +67,15 @@ class LocalVideoDownloader(VideoDownloader):
         video_path = os.path.join(self.output_dir, self.video_filename)
         if not os.path.exists(video_path):
             raise FileNotFoundError(f"Видео {self.video_filename} не найдено в папке {self.output_dir}.")
-        return video_path
+        return Video(video_path, self.video_filename)
+
+# ----------------------------------------------------------------------------------------------------------------------
 
 
 class SaveMixin:
-    def save(self, frame, face_location, output_dir):
-        top, right, bottom, left = face_location
-        face_image = frame[top:bottom, left:right]
-        face_filename = f"{uuid.uuid4()}.jpg"
+    def save(self, face_image, video_name: str, output_dir):
+        face_filename = f"{video_name.rstrip('.mp4')}_{uuid.uuid4()}.jpg"
+
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
         cv2.imwrite(os.path.join(output_dir, face_filename), face_image)
@@ -78,15 +83,16 @@ class SaveMixin:
 
 
 class FaceExtractor(SaveMixin):
-    def __init__(self, video_file, output_dir, deepfake, frame_skip=0):
+    def __init__(self, video_path, video_name, output_dir, deepfake, frame_skip=0):
+        self.video_name = video_name
         self.frame_skip = frame_skip
-        self.video_file = video_file
+        self.video_path = video_path
         self.output_dir = output_dir
         self.is_deepfake = deepfake
-        self.faces_df = pd.DataFrame(columns=["filename", "deepfake"])
+        self.faces_df = pd.DataFrame(columns=["filepath", "deepfake"])
 
     def process_video(self):
-        video_capture = cv2.VideoCapture(self.video_file)
+        video_capture = cv2.VideoCapture(self.video_path)
         frame_count, total_faces = 0, 0
 
         while True:
@@ -98,7 +104,8 @@ class FaceExtractor(SaveMixin):
             if frame_count % (self.frame_skip + 1) == 0:
                 face_locations = self.extract_faces_from_frame(frame)
                 for face_location in face_locations:
-                    face_filename = self.save(frame, face_location, self.output_dir)
+                    face_image = self.adjust_face_size(frame, face_location)
+                    face_filename = self.save(face_image, self.video_name, self.output_dir)
                     self.record_face_data(face_filename)
 
                 total_faces += len(face_locations)
@@ -113,9 +120,21 @@ class FaceExtractor(SaveMixin):
         rgb_frame = frame[:, :, ::-1]
         return face_recognition.face_locations(rgb_frame)
 
-    def record_face_data(self, face_filename):
+    def adjust_face_size(self, frame, face_location):
+        top, right, bottom, left = face_location
+        height, width = bottom - top, right - left
+
+        # Увеличиваем размер на 20%
+        top = max(0, top - height // 10)
+        bottom = min(frame.shape[0], bottom + height // 10)
+        left = max(0, left - width // 10)
+        right = min(frame.shape[1], right + width // 10)
+
+        return frame[top:bottom, left:right]
+
+    def record_face_data(self, face_path):
         self.faces_df = pd.concat(
-            [self.faces_df, pd.DataFrame({"filename": [face_filename], "deepfake": [self.is_deepfake]})]
+            [self.faces_df, pd.DataFrame({"filepath": [face_path], "deepfake": [self.is_deepfake]})]
         )
 
     def save_face_data(self, temp_csv_path):
@@ -123,7 +142,7 @@ class FaceExtractor(SaveMixin):
         print("Обработка видео завершена.")
 
 
-class FaceCleanupManager:
+class FaceCleanup:
     def __init__(self, temp_csv, raw_faces_dir, final_csv, result_dir):
         self.temp_csv = temp_csv
         self.raw_faces_dir = raw_faces_dir
@@ -133,12 +152,12 @@ class FaceCleanupManager:
     def cleanup_faces(self):
         temp_faces_df = pd.read_csv(self.temp_csv)
         temp_faces_df = temp_faces_df[
-            temp_faces_df['filename'].apply(lambda x: os.path.exists(os.path.join(self.raw_faces_dir, x)))]
+            temp_faces_df['filepath'].apply(lambda x: os.path.exists(os.path.join(self.raw_faces_dir, x)))]
 
         if not os.path.exists(self.result_dir):
             os.makedirs(self.result_dir)
 
-        for face_file in temp_faces_df['filename']:
+        for face_file in temp_faces_df['filepath']:
             shutil.move(os.path.join(self.raw_faces_dir, face_file), os.path.join(self.result_dir, face_file))
 
         self.update_permanent_csv(temp_faces_df)
@@ -155,31 +174,39 @@ class FaceCleanupManager:
 
 
 @click.command()
-@click.option('--normal-video-dir', default='videos/normal', help='Папка с локальными видео.')
-@click.option('--deepfake-video-dir', default='videos/deepfake', help='Папка с локальными видео.')
-@click.option('--raw-faces-dir', default='raw_faces', help='Папка для сохранения сырых изображений лиц.')
-@click.option('--result-faces-dir', default='result_faces', help='Папка для сохранения итоговых изображений лиц.')
-@click.option('--permanent-csv-file', default='faces.csv', help='CSV файл для хранения данных о лицах.')
-def main(video_dir, raw_faces_dir, result_faces_dir, permanent_csv_file):
+@click.option('--normal-video-dir', default=os.path.join('videos', 'normal'), help='Папка с нормальными видео.')
+@click.option('--deepfake-video-dir', default=os.path.join('videos', 'deepfake'), help='Папка с дипфейками.')
+@click.option('--raw_photos-dir', default='raw_photos', help='Папка для сохранения сырых изображений лиц.')
+@click.option('--photos-dir', default='photos', help='Папка для сохранения итоговых изображений лиц.')
+@click.option('--permanent-csv-file', default='meta.csv', help='CSV файл для хранения данных о лицах.')
+def main(normal_video_dir, deepfake_video_dir, raw_photos_dir, photos_dir, permanent_csv_file):
     while True:
         temp_csv_file = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4()}.csv")
 
         try:
+            is_deepfake = click.prompt(
+                'Выберите тип видео',
+                type=click.Choice(['Deepfake', 'Normal'], case_sensitive=False),
+                show_choices=True,
+                default='Normal'
+            ) == 'Deepfake'
+
+            video_dir = deepfake_video_dir if is_deepfake else normal_video_dir
             video_downloader = choose_video_downloader(video_dir)
-            video_path = video_downloader.download()
+            video_path, video_name = video_downloader.download()
 
-            is_deepfake = click.prompt('Выбери тип видео (1 - дипфейк, 2 - обычное)', type=int, default=2) == 1
-
-            face_extractor = FaceExtractor(video_path, raw_faces_dir, is_deepfake)
+            face_extractor = FaceExtractor(video_path, video_name, raw_photos_dir, is_deepfake)
             face_extractor.process_video()
             face_extractor.save_face_data(temp_csv_file)
-            os.remove(video_path)
 
-            open_folder(raw_faces_dir)
+            open_folder(raw_photos_dir)
             click.prompt("Удалите ненужные изображения из папки raw_faces и нажмите Enter для продолжения", type=str,
                          default="")
 
-            cleanup_manager = FaceCleanupManager(temp_csv_file, raw_faces_dir, permanent_csv_file, result_faces_dir)
+            folder = choose_folder()
+            full_output_dir = os.path.join(photos_dir, folder)
+
+            cleanup_manager = FaceCleanup(temp_csv_file, raw_photos_dir, permanent_csv_file, full_output_dir)
             cleanup_manager.cleanup_faces()
         except Exception as err:
             print(err)
@@ -188,15 +215,40 @@ def main(video_dir, raw_faces_dir, result_faces_dir, permanent_csv_file):
 
 
 def choose_video_downloader(video_dir):
-    is_youtube_video = click.prompt(
-        'Выбери 1 для обработки видео с YouTube, 2 для обработки заранее загруженного видео', type=int,
-        default=1) == 1
-    if is_youtube_video:
-        youtube_link = click.prompt('Ссылка на видео: ', type=str)
+    choice = click.prompt(
+        'Выберите источник видео',
+        type=click.Choice(['Youtube', 'Local'], case_sensitive=False),
+        show_choices=True,
+        default='Youtube'
+    )
+    if choice == 'Youtube':
+        youtube_link = click.prompt('Ссылка на видео', type=str)
         return YouTubeVideoDownloader(video_dir, youtube_link)
     else:
-        video_filename = click.prompt(f'Введи название видео в папке {video_dir}', type=str)
+        video_filename = click.prompt(f'Введите название видео в папке {video_dir}', type=str)
         return LocalVideoDownloader(video_dir, video_filename)
+
+
+def choose_folder():
+    folders = {
+        '1': 'men/black',
+        '2': 'men/white',
+        '3': 'men/asian',
+        '4': 'women/black',
+        '5': 'women/white',
+        '6': 'women/asian'
+    }
+    folder_choice = click.prompt(
+        'Выбери папку для сохранения изображений: \n'
+        '1 - men/black\n'
+        '2 - men/white\n'
+        '3 - men/asian\n'
+        '4 - women/black\n'
+        '5 - women/white\n'
+        '6 - women/asian',
+        type=str
+    )
+    return folders.get(folder_choice, 'men/white')
 
 
 def open_folder(path):
