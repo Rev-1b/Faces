@@ -47,10 +47,11 @@ class YouTubeVideoDownloader(VideoDownloader):
             raise ValueError("Не удалось найти видеопоток без звука на YouTube.")
 
         print(f"Выбран поток с разрешением: {video_stream.resolution}")
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
-        video_stream.download(output_path=os.path.dirname(temp_file.name), filename=os.path.basename(temp_file.name))
+        video_filename = f"{uuid.uuid4()}.mp4"
+        output_path = os.path.join(self.output_dir, video_filename)
+        video_stream.download(output_path=self.output_dir, filename=video_filename)
         print("\nЗагрузка завершена!")
-        return temp_file.name
+        return output_path
 
 
 class LocalVideoDownloader(VideoDownloader):
@@ -65,8 +66,20 @@ class LocalVideoDownloader(VideoDownloader):
         return video_path
 
 
-class FaceExtractor:
-    def __init__(self, video_file, output_dir, deepfake):
+class SaveMixin:
+    def save(self, frame, face_location, output_dir):
+        top, right, bottom, left = face_location
+        face_image = frame[top:bottom, left:right]
+        face_filename = f"{uuid.uuid4()}.jpg"
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+        cv2.imwrite(os.path.join(output_dir, face_filename), face_image)
+        return face_filename
+
+
+class FaceExtractor(SaveMixin):
+    def __init__(self, video_file, output_dir, deepfake, frame_skip=0):
+        self.frame_skip = frame_skip
         self.video_file = video_file
         self.output_dir = output_dir
         self.is_deepfake = deepfake
@@ -82,29 +95,23 @@ class FaceExtractor:
                 print("Все кадры обработаны, завершаем.")
                 break
 
-            face_locations = self.extract_faces_from_frame(frame)
-            for face_location in face_locations:
-                face_filename = self.save_face(frame, face_location)
-                self.record_face_data(face_filename)
+            if frame_count % (self.frame_skip + 1) == 0:
+                face_locations = self.extract_faces_from_frame(frame)
+                for face_location in face_locations:
+                    face_filename = self.save(frame, face_location, self.output_dir)
+                    self.record_face_data(face_filename)
+
+                total_faces += len(face_locations)
+                print(f"Обработано кадров: {frame_count}, Найдено лиц: {total_faces}")
 
             frame_count += 1
-            total_faces += len(face_locations)
-            print(f"Обработано кадров: {frame_count}, Найдено лиц: {total_faces}")
 
         video_capture.release()
 
-    def extract_faces_from_frame(self, frame):
+    @staticmethod
+    def extract_faces_from_frame(frame):
         rgb_frame = frame[:, :, ::-1]
         return face_recognition.face_locations(rgb_frame)
-
-    def save_face(self, frame, face_location):
-        top, right, bottom, left = face_location
-        face_image = frame[top:bottom, left:right]
-        face_filename = f"{uuid.uuid4()}.jpg"
-        if not os.path.exists(self.output_dir):
-            os.makedirs(self.output_dir)
-        cv2.imwrite(os.path.join(self.output_dir, face_filename), face_image)
-        return face_filename
 
     def record_face_data(self, face_filename):
         self.faces_df = pd.concat(
@@ -148,7 +155,8 @@ class FaceCleanupManager:
 
 
 @click.command()
-@click.option('--video-dir', default='downloaded_video', help='Папка с локальными видео.')
+@click.option('--normal-video-dir', default='videos/normal', help='Папка с локальными видео.')
+@click.option('--deepfake-video-dir', default='videos/deepfake', help='Папка с локальными видео.')
 @click.option('--raw-faces-dir', default='raw_faces', help='Папка для сохранения сырых изображений лиц.')
 @click.option('--result-faces-dir', default='result_faces', help='Папка для сохранения итоговых изображений лиц.')
 @click.option('--permanent-csv-file', default='faces.csv', help='CSV файл для хранения данных о лицах.')
