@@ -25,7 +25,7 @@ class VideoDownloader:
 
 
 class YouTubeVideoDownloader(VideoDownloader):
-    def __init__(self, output_dir, youtube_url, resolution='360p'):
+    def __init__(self, output_dir, youtube_url, resolution='720p'):
         super().__init__(output_dir)
         self.youtube_url = youtube_url
         self.resolution = resolution
@@ -37,7 +37,7 @@ class YouTubeVideoDownloader(VideoDownloader):
 
         if video_stream is None:
             print('Неподходящее разрешение, пробую другое')
-            video_stream = yt.streams.filter(adaptive=True, type="video", resolution='360p',
+            video_stream = yt.streams.filter(adaptive=True, type="video", resolution='480p',
                                              file_extension='mp4').first()
 
         if video_stream is None:
