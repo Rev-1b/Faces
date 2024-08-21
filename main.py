@@ -32,7 +32,7 @@ def main(normal_video_dir, deepfake_video_dir, raw_photos_dir, photos_dir, perma
             video_path, video_name = video_downloader.download()
 
             # В этом месте выбираем, каким обработчиком изображения пользоваться
-            face_extractor = FaceRecognitionExtractor(video_path, video_name, raw_photos_dir, is_deepfake)
+            face_extractor = HaarcascadesExtractor(video_path, video_name, raw_photos_dir, is_deepfake)
             face_extractor.process_video()
             face_extractor.save_face_data(temp_csv_file)
 
