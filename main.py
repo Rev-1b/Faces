@@ -4,7 +4,7 @@ import uuid
 
 import click
 
-from image_parsers import FaceRecognitionExtractor, HaarcascadesExtractor
+from image_parsers import FaceRecognitionExtractor, HaarcascadesExtractor, DeepFaceExtractor
 from image_savers import FaceCleanup
 from utils import choose_video_downloader, open_folder, choose_folder
 
@@ -31,7 +31,8 @@ def main(normal_video_dir, deepfake_video_dir, raw_photos_dir, photos_dir, perma
             video_downloader = choose_video_downloader(video_dir)
             video_path, video_name = video_downloader.download()
 
-            face_extractor = HaarcascadesExtractor(video_path, video_name, raw_photos_dir, is_deepfake)
+            # В этом месте выбираем, каким обработчиком изображения пользоваться
+            face_extractor = FaceRecognitionExtractor(video_path, video_name, raw_photos_dir, is_deepfake)
             face_extractor.process_video()
             face_extractor.save_face_data(temp_csv_file)
 
@@ -52,3 +53,7 @@ def main(normal_video_dir, deepfake_video_dir, raw_photos_dir, photos_dir, perma
 
 if __name__ == "__main__":
     main()
+
+
+login = 'wolftau'
+password = 'wtal997'
