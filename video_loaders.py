@@ -72,7 +72,7 @@ class YouTubeVideoDownloader(VideoDownloader):
         # if not further:
         #     raise Exception('Видео загружено, начинаем сначала')
 
-        print("\nЗагрузка завершена!")
+        print(f"\nЗагрузка видео {video_filename} завершена!")
         return Video(output_path, video_filename)
 
 

@@ -114,7 +114,7 @@ class HaarcascadesExtractor(BaseExtractor, SaveMixin):
             self.record_face_data(face_filename)
 
             total_faces += len(face_locations)
-        print(f"Обработано кадров: {frame_count}/{total_frames}, Найдено лиц: {total_faces}")
+        print(f"\rОбработано кадров: {frame_count}/{total_frames}, Найдено лиц: {total_faces}", end="")
         return total_faces
 
     def extract_faces_from_frame(self, frame):
@@ -152,7 +152,7 @@ class FaceRecognitionExtractor(BaseExtractor, SaveMixin):
             self.record_face_data(face_filename)
 
         total_faces += len(face_locations)
-        print(f"Обработано кадров: {frame_count}/{total_frames}, Найдено лиц: {total_faces}")
+        print(f"\rОбработано кадров: {frame_count}/{total_frames}, Найдено лиц: {total_faces}", end="")
 
         return total_faces
 
@@ -190,7 +190,7 @@ class DeepFaceExtractor(BaseExtractor, SaveMixin):
             self.record_face_data(face_filename)
 
         total_faces += len(face_images)
-        print(f"Обработано кадров: {frame_count}/{total_frames}, Найдено лиц: {total_faces}")
+        print(f"\rОбработано кадров: {frame_count}/{total_frames}, Найдено лиц: {total_faces}", end="")
 
         return total_faces
 
