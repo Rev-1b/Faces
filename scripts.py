@@ -56,7 +56,7 @@ class ManualInput(BaseScript):
             default='Deepfake'
         ) == 'Deepfake'
 
-        constant_frame_scip = click.prompt(
+        constant_frame_skip = click.prompt(
             text='Выберите, сколько кадров будет пропускаться у обрабатываемых видео.\n'
                  'Если вы хотите указывать количество пропускаемых кадров для каждого видео\n'
                  'индивидуально, оставьте пустой строку ввода',
@@ -75,7 +75,7 @@ class ManualInput(BaseScript):
                     text='Выберите, сколько кадров пропускать',
                     type=int,
                     default=10,
-                ) if constant_frame_scip is None else constant_frame_scip
+                ) if constant_frame_skip is None else constant_frame_skip
 
                 # Как правило, обрезать изображение нужно только для дипфейк-видео, в которых производится сравнение
                 # между оригиналом и дипфейком, притом что дипфейк всегда с правой стороны
@@ -96,119 +96,66 @@ class ManualInput(BaseScript):
                 print('Начинаем сначала')
 
 
+class LinksInput(BaseScript):
+    def execute_script(self):
+        is_deepfake = click.prompt(
+            text='Выберите, видео какого типа вы будете обрабатывать',
+            type=click.Choice(['Deepfake', 'Normal'], case_sensitive=False),
+            default='Deepfake'
+        ) == 'Deepfake'
 
+        constant_frame_skip = click.prompt(
+            text='Выберите, сколько кадров будет пропускаться у обрабатываемых видео.\n'
+                 'Если вы хотите указывать количество пропускаемых кадров для каждого видео\n'
+                 'индивидуально, оставьте пустой строку ввода',
+            type=int,
+            default=None,
+            show_default=False,
+        )
+        with open(self.config.links_file, 'r') as file:
+            links = file.readlines()
 
+        # Проверка, что файл не пустой
+        if not links:
+            raise Exception('Файл с ссылками пустой.')
 
+        for link in links:
+            try:
+                # Проверка на пустую строку
+                if not link.strip():
+                    print("Пустая строка в файле ссылок.")
+                    continue
 
-def manual_input_script(config: Config):
-    is_deepfake = click.prompt(
-        text='Выберите, видео какого типа вы будете обрабатывать',
-        type=click.Choice(['Deepfake', 'Normal'], case_sensitive=False),
-        show_choices=True,
-        default='Deepfake'
-    ) == 'Deepfake'
+                # Разбиваем строку на компоненты
+                parts = link.strip().split()
+                if constant_frame_skip is None and (len(parts) < 2 or not parts[1].isdigit()):
+                    print(f"Неверный формат строки: {link}. Ожидается два элемента (ссылка и frame_skip).")
+                    continue
 
-    constant_frame_scip = click.prompt(
-        text='Выберите, сколько кадров будет пропускаться у обрабатываемых видео.\n'
-             'Если вы хотите указывать количество пропускаемых кадров для каждого видео\n'
-             'индивидуально, оставьте пустой строку ввода',
-        type=int,
-        default=None,
-        show_default=False,
-    )
+                video_url = parts[0]
 
-    while True:
-        temp_csv_file = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4()}.csv")
-        try:
-            video_dir = config.deepfake_video_dir if is_deepfake else config.normal_video_dir
-            video_downloader = choose_video_downloader(video_dir)
+                frame_skip = int(parts[1]) if constant_frame_skip is None else constant_frame_skip
 
-            frame_skip = click.prompt(
-                text='Выберите, сколько кадров пропускать',
-                type=int,
-                default=10,
-                show_default=True
-            ) if constant_frame_scip is None else constant_frame_scip
+                # Проверка, что директории существуют, если нет — создаём их
+                for directory in [self.config.normal_video_dir, self.config.raw_photos_dir, self.config.photos_dir]:
+                    if not os.path.exists(directory):
+                        print(f"Создаём директорию: {directory}")
+                        os.makedirs(directory)
 
-            # Как правило, обрезать изображение нужно только для дипфейк-видео, в которых производится сравнение между
-            # оригиналом и дипфейком, притом что дипфейк всегда с правой стороны
-            if is_deepfake:
-                crop = click.prompt(
-                    text='Обрезать изображение так, чтобы осталась только правая половина?',
-                    type=click.Choice(['Y', 'N'], case_sensitive=False),
-                    default='N',
-                    show_default=True,
-                    show_choices=True
-                ) == 'Y'
-            else:
-                crop = False
+                # Создаём временный CSV файл
+                temp_csv_file = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4()}.csv")
 
-            video_path, video_name = video_downloader.download()
-            face_extractor = HaarcascadesExtractor(
-                video_path, video_name, config.raw_photos_dir,
-                is_deepfake, crop, frame_skip)
+                self.process_and_cleanup(temp_csv_file, video_url, is_deepfake, False, frame_skip)
 
-            face_extractor.process_video()
-            face_extractor.save_face_data(temp_csv_file)
+                # Успешная обработка — удаляем ссылку из файла
+                with open(self.config.links_file, 'w') as file:
+                    remaining_links = [l for l in links if l != link]
+                    file.write('\n'.join(remaining_links))
 
-            open_folder(raw_photos_dir)
-            click.prompt("Удалите ненужные изображения из папки raw_faces и нажмите Enter для продолжения", type=str,
-                         default="")
-
-            folder = choose_folder()
-            full_output_dir = os.path.join(photos_dir, folder)
-
-            cleanup_manager = FaceCleanup(temp_csv_file, raw_photos_dir, permanent_csv_file, full_output_dir)
-            cleanup_manager.cleanup_faces()
-        except Exception as err:
-            print(err)
-        finally:
-            print('Начинаем сначала')
-
-
-def link_file_input_script(normal_video_dir, deepfake_video_dir, raw_photos_dir, photos_dir, permanent_csv_file,
-                           links_file):
-    with open(links_file, 'r') as file:
-        links = file.readlines()
-
-    for link in links:
-        try:
-            print(link)
-            # Разбиваем строку на ссылку и значение frame_skip
-            if not link:
-                break
-            parts = link.strip().split()
-            video_url = parts[0]
-            frame_skip = int(parts[1])
-            # frame_skip = 5
-
-            temp_csv_file = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4()}.csv")
-
-            # Используем нормальную папку для всех видео
-            video_downloader = YouTubeVideoDownloader(normal_video_dir, video_url)
-
-            # Загружаем видео с использованием ссылки
-            video_path, video_name = video_downloader.download()
-
-            # Инициализируем и запускаем извлечение лиц
-            face_extractor = HaarcascadesExtractor(video_path, video_name, raw_photos_dir, False, frame_skip)
-            face_extractor.process_video()
-            face_extractor.save_face_data(temp_csv_file)
-
-            # Открываем папку для редактирования изображений
-            open_folder(raw_photos_dir)
-            click.prompt("Удалите ненужные изображения из папки raw_faces и нажмите Enter для продолжения", type=str,
-                         default="")
-
-            folder = choose_folder()
-            full_output_dir = os.path.join(photos_dir, folder)
-
-            cleanup_manager = FaceCleanup(temp_csv_file, raw_photos_dir, permanent_csv_file, full_output_dir)
-            cleanup_manager.cleanup_faces()
-        except Exception as err:
-            print(f"Ошибка при обработке видео {video_url}: {err}")
-        finally:
-            print('Обработка следующего видео')
+            except Exception as err:
+                print(err)
+            finally:
+                print('Обработка следующего видео')
 
 
 def predownloaded_input_script(normal_video_dir, deepfake_video_dir, temp_video_dir, raw_photos_dir, photos_dir,
