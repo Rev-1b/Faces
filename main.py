@@ -1,13 +1,15 @@
 import os
 
 import click
+
 from scripts import Config, script_list
 
 
 @click.command()
 @click.option('--normal-video-dir', default=os.path.join('videos', 'normal'), help='Папка с нормальными видео.')
 @click.option('--deepfake-video-dir', default=os.path.join('videos', 'deepfake'), help='Папка с дипфейками.')
-@click.option('--temp-video-dir', default=os.path.join('videos', 'temp'), help='Временная папка с предзагруженными видео.')
+@click.option('--temp-video-dir', default=os.path.join('videos', 'temp'),
+              help='Временная папка с предзагруженными видео.')
 @click.option('--raw_photos-dir', default='raw_photos', help='Папка для сохранения сырых изображений лиц.')
 @click.option('--photos-dir', default='photos', help='Папка для сохранения итоговых изображений лиц.')
 @click.option('--permanent-csv-file', default='meta.csv', help='CSV файл для хранения данных о лицах.')
@@ -28,13 +30,13 @@ def main(normal_video_dir: str,
         'manual - вы вручную вводите ссылку на YouTube или путь до локального видео\n'
         'links - скрипт будет автоматически обрабатывать YouTube ссылки из файла links\n'
         'downloaded - скрипт предназначенный для обработки видео из папки temp_videos\n',
-        type=click.Choice(scripts.keys(), case_sensitive=False),
+        type=click.Choice(script_list.keys(), case_sensitive=False),
         default='manual',
         show_default=True,
         show_choices=True
     )
-    script = scripts[script_name]
-    script(config)
+    script = script_list[script_name](config)
+    script.execute_script()
 
 
 if __name__ == "__main__":

@@ -1,4 +1,5 @@
 import os
+import platform
 import tempfile
 import uuid
 from collections import namedtuple
@@ -7,8 +8,8 @@ import click
 
 from image_parsers import HaarcascadesExtractor
 from image_savers import FaceCleanup
-from utils import choose_video_downloader, open_folder, choose_folder
-from video_loaders import YouTubeVideoDownloader, PreloadedVideoDownloader
+from utils import safe_prompt
+from video_loaders import YouTubeVideoDownloader, PreloadedVideoDownloader, LocalVideoDownloader
 
 Config = namedtuple('Config', [
     'normal_video_dir',
@@ -37,26 +38,54 @@ class BaseScript:
         face_extractor.process_video()
         face_extractor.save_face_data(temp_csv_file)
 
-        open_folder(self.config.raw_photos_dir)
-        click.prompt("Удалите ненужные изображения из папки raw_faces")
+        self.open_folder(self.config.raw_photos_dir)
+        safe_prompt("Удалите ненужные изображения из папки raw_faces")
 
-        folder = choose_folder()
+        folder = self.choose_folder()
         full_output_dir = os.path.join(self.config.photos_dir, folder)
 
         cleanup_manager = FaceCleanup(temp_csv_file, self.config.raw_photos_dir,
                                       self.config.permanent_csv_file, full_output_dir)
         cleanup_manager.cleanup_faces()
 
+    @staticmethod
+    def open_folder(path):
+        if platform.system() == "Windows":
+            os.startfile(path)
+        elif platform.system() == "Darwin":
+            os.system(f"open {path}")
+        elif platform.system() == "Linux":
+            os.system(f"xdg-open {path}")
+        else:
+            print(f"Операционная система {platform.system()} не поддерживается.")
+
+    @staticmethod
+    def choose_folder():
+        folders = {
+            '1': os.path.join('men', 'black'),
+            '2': os.path.join('men', 'white'),
+            '3': os.path.join('men', 'asian'),
+            '4': os.path.join('women', 'black'),
+            '5': os.path.join('women', 'white'),
+            '6': os.path.join('women', 'asian'),
+        }
+        folder_choice = safe_prompt(
+            f'Выбери папку для сохранения изображений: \n'
+            f'{(f"{key} - {value}\n" for key, value in folders.items())}',
+            type=str
+        )
+        return folders.get(folder_choice)
+
 
 class ManualInput(BaseScript):
     def execute_script(self):
-        is_deepfake = click.prompt(
+        is_deepfake = safe_prompt(
             text='Выберите, видео какого типа вы будете обрабатывать',
             type=click.Choice(['Deepfake', 'Normal'], case_sensitive=False),
             default='Deepfake'
         ) == 'Deepfake'
 
-        constant_frame_skip = click.prompt(
+        constant_frame_skip = safe_prompt(
             text='Выберите, сколько кадров будет пропускаться у обрабатываемых видео.\n'
                  'Если вы хотите указывать количество пропускаемых кадров для каждого видео\n'
                  'индивидуально, оставьте пустой строку ввода',
@@ -69,9 +98,9 @@ class ManualInput(BaseScript):
             temp_csv_file = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4()}.csv")
             try:
                 video_dir = self.config.deepfake_video_dir if is_deepfake else self.config.normal_video_dir
-                video_downloader = choose_video_downloader(video_dir)
+                video_downloader = self.choose_video_downloader(video_dir)
 
-                frame_skip = click.prompt(
+                frame_skip = safe_prompt(
                     text='Выберите, сколько кадров пропускать',
                     type=int,
                     default=10,
@@ -80,7 +109,7 @@ class ManualInput(BaseScript):
                 # Как правило, обрезать изображение нужно только для дипфейк-видео, в которых производится сравнение
                 # между оригиналом и дипфейком, притом что дипфейк всегда с правой стороны
                 if is_deepfake:
-                    crop = click.prompt(
+                    crop = safe_prompt(
                         text='Обрезать изображение так, чтобы осталась только правая половина?',
                         type=click.Choice(['Y', 'N'], case_sensitive=False),
                         default='N',
@@ -95,19 +124,35 @@ class ManualInput(BaseScript):
             finally:
                 print('Начинаем сначала')
 
+    @staticmethod
+    def choose_video_downloader(video_dir):
+        choice = safe_prompt(
+            'Выберите источник видео',
+            type=click.Choice(['Youtube', 'Local'], case_sensitive=False),
+            show_choices=True,
+            default='Youtube'
+        )
+        if choice == 'Youtube':
+            youtube_link = safe_prompt('Ссылка на видео', type=str)
+            return YouTubeVideoDownloader(video_dir, youtube_link)
+        else:
+            video_filename = safe_prompt(f'Введите название видео в папке {video_dir}', type=str)
+            return LocalVideoDownloader(video_dir, video_filename)
+
 
 class LinksInput(BaseScript):
     def execute_script(self):
-        is_deepfake = click.prompt(
+        is_deepfake = safe_prompt(
             text='Выберите, видео какого типа вы будете обрабатывать',
             type=click.Choice(['Deepfake', 'Normal'], case_sensitive=False),
             default='Deepfake'
         ) == 'Deepfake'
 
-        constant_frame_skip = click.prompt(
+        constant_frame_skip = safe_prompt(
             text='Выберите, сколько кадров будет пропускаться у обрабатываемых видео.\n'
-                 'Если вы хотите указывать количество пропускаемых кадров для каждого видео\n'
-                 'индивидуально, оставьте пустой строку ввода',
+                 'Если вы хотите, чтобы для каждого видео было индивидуальное количество\n'
+                 'пропускаемых кадров, они должны быть указаны в файле links. В этом случае\n'
+                 'оставьте строку ввода пустой',
             type=int,
             default=None,
             show_default=False,
@@ -149,7 +194,7 @@ class LinksInput(BaseScript):
 
                 # Успешная обработка — удаляем ссылку из файла
                 with open(self.config.links_file, 'w') as file:
-                    remaining_links = [l for l in links if l != link]
+                    remaining_links = [remain_link for remain_link in links if remain_link != link]
                     file.write('\n'.join(remaining_links))
 
             except Exception as err:
@@ -158,50 +203,44 @@ class LinksInput(BaseScript):
                 print('Обработка следующего видео')
 
 
-def predownloaded_input_script(normal_video_dir, deepfake_video_dir, temp_video_dir, raw_photos_dir, photos_dir,
-                               permanent_csv_file):
-    while True:
-        temp_csv_file = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4()}.csv")
-        try:
-            is_deepfake = True
-            video_dir = deepfake_video_dir if is_deepfake else normal_video_dir
-            video_downloader = PreloadedVideoDownloader(video_dir, temp_video_dir)
+class DownloadedInput(BaseScript):
+    def execute_script(self):
+        is_deepfake = safe_prompt(
+            text='Выберите, видео какого типа вы будете обрабатывать',
+            type=click.Choice(['Deepfake', 'Normal'], case_sensitive=False),
+            default='Deepfake'
+        ) == 'Deepfake'
 
-            # crop = click.prompt(
-            #     'Обрезать ли изображение?',
-            #     type=click.Choice(['Y', 'N'], case_sensitive=False),
-            #     default='N',
-            #     show_default=True,
-            #     show_choices=True
-            # ) == 'Y'
+        constant_frame_skip = safe_prompt(
+            text='Выберите, сколько кадров будет пропускаться у обрабатываемых видео.\n',
+            type=int,
+            default=10,
+        )
+        while True:
+            temp_csv_file = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4()}.csv")
+            try:
+                video_dir = self.config.deepfake_video_dir if is_deepfake else self.config.normal_video_dir
+                video_downloader = PreloadedVideoDownloader(video_dir, self.config.temp_video_dir)
 
-            crop = False
-            frame_skip = 5
+                if is_deepfake:
+                    crop = safe_prompt(
+                        text='Обрезать изображение так, чтобы осталась только правая половина?',
+                        type=click.Choice(['Y', 'N'], case_sensitive=False),
+                        default='N',
+                    ) == 'Y'
+                else:
+                    crop = False
 
-            video_path, video_name = video_downloader.download()
+                self.process_and_cleanup(temp_csv_file, video_downloader, is_deepfake, crop, constant_frame_skip)
 
-            face_extractor = HaarcascadesExtractor(video_path, video_name, raw_photos_dir, is_deepfake, crop,
-                                                   frame_skip)
-            face_extractor.process_video()
-            face_extractor.save_face_data(temp_csv_file)
-
-            open_folder(raw_photos_dir)
-            click.prompt("Удалите ненужные изображения из папки raw_faces и нажмите Enter для продолжения", type=str,
-                         default="")
-
-            folder = choose_folder()
-            full_output_dir = os.path.join(photos_dir, folder)
-
-            cleanup_manager = FaceCleanup(temp_csv_file, raw_photos_dir, permanent_csv_file, full_output_dir)
-            cleanup_manager.cleanup_faces()
-        except Exception as err:
-            print(err)
-        finally:
-            print('Начинаем сначала')
+            except Exception as err:
+                print(err)
+            finally:
+                print('Начинаем сначала')
 
 
 script_list = {
-    'manual': manual_input_script,
-    'links': link_file_input_script,
-    'downloaded': predownloaded_input_script,
+    'manual': ManualInput,
+    'links': LinksInput,
+    'downloaded': DownloadedInput,
 }
