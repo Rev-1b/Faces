@@ -42,17 +42,7 @@ class YouTubeVideoDownloader(VideoDownloader):
         self.resolution = resolution
 
     def download(self, start_time=None, end_time=None):
-        yt = YouTube(self.youtube_url, on_progress_callback=self.show_progress, use_oauth=True)
-        video_stream = yt.streams.filter(adaptive=True, type="video", resolution=self.resolution,
-                                         file_extension='mp4').first()
-
-        if video_stream is None:
-            print('Неподходящее разрешение, пробую другое')
-            video_stream = yt.streams.filter(adaptive=True, type="video", resolution='480p',
-                                             file_extension='mp4').first()
-
-        if video_stream is None:
-            raise ValueError("Не удалось найти видеопоток без звука на YouTube.")
+        video_stream = self.get_video_stream(self.youtube_url)
 
         print(f"Выбран поток с разрешением: {video_stream.resolution}")
         video_filename = f"{uuid.uuid4()}.mp4"
@@ -62,18 +52,27 @@ class YouTubeVideoDownloader(VideoDownloader):
         if start_time is not None or end_time is not None:
             output_path = self.trim_video(output_path, start_time, end_time)
 
-        # further = click.prompt(
-        #     'Продолжаем?',
-        #     type=click.Choice(['Y', 'N'], case_sensitive=False),
-        #     default='Y',
-        #     show_default=True,
-        #     show_choices=True
-        # ) == 'Y'
-        # if not further:
-        #     raise Exception('Видео загружено, начинаем сначала')
-
         print(f"\nЗагрузка видео {video_filename} завершена!")
         return Video(output_path, video_filename)
+
+    def get_video_stream(self, youtube_url):
+        yt = YouTube(youtube_url, 'MWEB', on_progress_callback=self.show_progress, use_oauth=True)
+        streams = yt.streams.filter(adaptive=True, type="video", file_extension='mp4')
+
+        # Фильтруем разрешения вручную
+        valid_resolutions = ['1080p', '720p', '480p']
+        video_stream = None
+
+        # Проходим по разрешениям, начиная с самого высокого
+        for res in valid_resolutions:
+            video_stream = streams.filter(res=res).first()
+            if video_stream:
+                break
+
+        if video_stream:
+            return video_stream
+        else:
+            raise ValueError("Видео в нужном диапазоне разрешений не найдено")
 
 
 class LocalVideoDownloader(VideoDownloader):
@@ -105,4 +104,41 @@ class LocalVideoDownloader(VideoDownloader):
             os.rename(video_path, original_path)
             print(f"Переименовано видео: {self.video_filename}")
         return original_path if original_path else video_path
+
+
+class PreloadedVideoDownloader(VideoDownloader):
+    def __init__(self, output_dir, temp_dir):
+        super().__init__(output_dir)
+        self.temp_dir = temp_dir
+
+    def download(self, start_time=None, end_time=None):
+        # Проверяем, что папка с временными видео существует
+        if not os.path.exists(self.temp_dir):
+            raise FileNotFoundError(f"Папка {self.temp_dir} не найдена.")
+
+        # Получаем список файлов в папке temp
+        video_files = [f for f in os.listdir(self.temp_dir) if os.path.isfile(os.path.join(self.temp_dir, f))]
+
+        # Если нет видеофайлов, бросаем исключение
+        if not video_files:
+            raise FileNotFoundError(f"В папке {self.temp_dir} нет видео.")
+
+        video_file = video_files[0]
+        video_path = os.path.join(self.temp_dir, video_file)
+
+        # Генерируем новое имя файла с UUID
+        new_filename = f"{uuid.uuid4()}.mp4"
+        new_video_path = os.path.join(self.output_dir, new_filename)
+
+        # Переименовываем и перемещаем видео в папку назначения
+        os.rename(video_path, new_video_path)
+
+        # Обрезаем видео, если указаны start_time и end_time
+        if start_time is not None or end_time is not None:
+            new_video_path = self.trim_video(new_video_path, start_time, end_time)
+
+        self.video_filename = new_filename
+        print(f"Видео {video_file} переименовано в {new_filename} и перемещено в {self.output_dir}")
+
+        return Video(new_video_path, self.video_filename)
 

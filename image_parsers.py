@@ -6,6 +6,7 @@ import face_recognition
 import pandas as pd
 from PIL import Image
 from facenet_pytorch import MTCNN
+from time import sleep
 
 
 class SaveMixin:
@@ -20,7 +21,9 @@ class SaveMixin:
 
 
 class BaseExtractor:
-    def __init__(self, video_path: str, video_name: str, output_dir: str, deepfake: bool, frame_skip: int = 10) -> int:
+    def __init__(self, video_path: str, video_name: str, output_dir: str, deepfake: bool, crop_image: bool = False,
+                 frame_skip: int = 10) -> int:
+        self.crop_image = crop_image
         self.video_name = video_name
         self.frame_skip = frame_skip
         self.video_path = video_path
@@ -33,6 +36,9 @@ class BaseExtractor:
         total_frames = int(video_capture.get(cv2.CAP_PROP_FRAME_COUNT))
         frame_count, total_faces = 0, 0
 
+        if self.crop_image:
+            print('Изображение будет обрезано')
+
         while True:
             ret, frame = video_capture.read()
             if not ret:
@@ -40,7 +46,7 @@ class BaseExtractor:
                 break
             if frame_count % self.frame_skip == 0:
 
-                if self.is_deepfake is True:
+                if self.is_deepfake is True and self.crop_image is True:
                     frame = self.get_right_half(frame)
 
                 total_faces = self.on_frame(total_frames, frame_count, total_faces, frame)
@@ -96,8 +102,9 @@ class HaarcascadesExtractor(BaseExtractor, SaveMixin):
     Также выдает изображения в виде квадрата. Предпочтительный extractor
     """
 
-    def __init__(self, video_path: str, video_name: str, output_dir: str, deepfake: bool, frame_skip: int = 7) -> int:
-        super().__init__(video_path, video_name, output_dir, deepfake, frame_skip)
+    def __init__(self, video_path: str, video_name: str, output_dir: str, deepfake: bool, crop_image: bool = False,
+                 frame_skip: int = 7) -> int:
+        super().__init__(video_path, video_name, output_dir, deepfake, crop_image, frame_skip)
         self.face_classifier = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 
     def on_frame(self, total_frames, frame_count, total_faces, frame):
@@ -114,6 +121,8 @@ class HaarcascadesExtractor(BaseExtractor, SaveMixin):
             self.record_face_data(face_filename)
 
             total_faces += len(face_locations)
+            sleep(0.35)
+
         print(f"\rОбработано кадров: {frame_count}/{total_frames}, Найдено лиц: {total_faces}", end="")
         return total_faces
 
@@ -143,6 +152,7 @@ class FaceRecognitionExtractor(BaseExtractor, SaveMixin):
     """
     Очень точный, но не может работать с видео в высоком качестве, как минимум на моем железе
     """
+
     def on_frame(self, total_frames, frame_count, total_faces, frame):
         frame = self.get_cropped_frame(frame)
         face_locations = self.extract_faces_from_frame(frame)
