@@ -31,16 +31,11 @@ def choose_folder():
         '6': os.path.join('women', 'asian'),
     }
     folder_choice = click.prompt(
-        'Выбери папку для сохранения изображений: \n'
-        '1 - men/black\n'
-        '2 - men/white\n'
-        '3 - men/asian\n'
-        '4 - women/black\n'
-        '5 - women/white\n'
-        '6 - women/asian',
+        f'Выбери папку для сохранения изображений: \n'
+        f'{(f"{key} - {value}\n" for key, value in folders.items())}',
         type=str
     )
-    return folders.get(folder_choice, 'men/white')
+    return folders.get(folder_choice)
 
 
 def open_folder(path):
