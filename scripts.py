@@ -1,6 +1,6 @@
 import os
 import platform
-import troubleshooting
+import tempfile
 import uuid
 from collections import namedtuple
 
@@ -161,18 +161,15 @@ class LinksInput(BaseScript):
         with open(self.config.links_file, 'r') as file:
             links = file.readlines()
 
-        # Проверка, что файл не пустой
         if not links:
             raise Exception('Файл с ссылками пустой.')
 
         for link in links:
             try:
-                # Проверка на пустую строку
                 if not link.strip():
                     print("Пустая строка в файле ссылок.")
                     continue
 
-                # Разбиваем строку на компоненты
                 parts = link.strip().split()
                 if constant_frame_skip is None and (len(parts) < 2 or not parts[1].isdigit()):
                     print(f"Неверный формат строки: {link}. Ожидается два элемента (ссылка и frame_skip).")
@@ -182,18 +179,14 @@ class LinksInput(BaseScript):
 
                 frame_skip = int(parts[1]) if constant_frame_skip is None else constant_frame_skip
 
-                # Проверка, что директории существуют, если нет — создаём их
                 for directory in [self.config.normal_video_dir, self.config.raw_photos_dir, self.config.photos_dir]:
                     if not os.path.exists(directory):
                         print(f"Создаём директорию: {directory}")
                         os.makedirs(directory)
 
-                # Создаём временный CSV файл
                 temp_csv_file = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4()}.csv")
-
                 self.process_and_cleanup(temp_csv_file, video_url, is_deepfake, False, frame_skip)
 
-                # Успешная обработка — удаляем ссылку из файла
                 with open(self.config.links_file, 'w') as file:
                     remaining_links = [remain_link for remain_link in links if remain_link != link]
                     file.write('\n'.join(remaining_links))

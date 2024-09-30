@@ -5,7 +5,6 @@ import cv2
 import pandas as pd
 from PIL import Image
 from facenet_pytorch import MTCNN
-from time import sleep
 
 from tqdm import tqdm
 
@@ -125,7 +124,7 @@ class HaarcascadesExtractor(BaseExtractor):
             gray_img,
             scaleFactor=1.1,
             minNeighbors=5,
-            minSize=(30, 30)  # ПОПРАВИТЬ
+            minSize=(150, 150)
         )
         return faces  # возвращает список лиц в формате (x, y, w, h)
 

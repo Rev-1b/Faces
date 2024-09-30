@@ -10,14 +10,12 @@ class MetaValidator:
         a = 0
 
     def validate_images(self):
-        # Получаем список всех изображений в папке
         all_images = self.get_all_images(self.images_root)
         meta_image_paths = set(self.meta_df['filepath'].values)
 
         # Проверяем, есть ли соответствующая запись в meta.csv для каждого изображения
         missing_images = []
         for image_path in all_images:
-            # relative_path = os.path.relpath(image_path, self.images_root)
             if image_path not in meta_image_paths:
                 missing_images.append(image_path)
 
@@ -59,7 +57,6 @@ class VideoChecker:
         # Извлекаем названия видео из имен изображений
         video_names = {self.extract_video_name(os.path.basename(img.strip())) for img in missing_images}
 
-        # Проверяем, в какой папке находится каждое видео
         for video_name in video_names:
             if self.is_video_deepfake(video_name):
                 self.deepfake_count += 1
@@ -67,7 +64,7 @@ class VideoChecker:
                 self.normal_count += 1
 
     def extract_video_name(self, image_name: str):
-        return image_name.split('_')[0]  # Извлекаем первый UUID из имени изображения
+        return image_name.split('_')[0]
 
     def is_video_deepfake(self, video_name: str):
         deepfake_video_path = os.path.join(self.videos_root, 'deepfake', f"{video_name}.mp4")
@@ -101,7 +98,6 @@ class MetaCreator:
                 "deepfake": is_deepfake
             })
 
-        # Сохраняем новый meta файл в формате CSV
         self.save_meta_to_csv()
 
     def extract_video_name(self, image_name: str):
@@ -112,14 +108,12 @@ class MetaCreator:
         return os.path.exists(deepfake_video_path)
 
     def save_meta_to_csv(self):
-        # Создаем DataFrame из списка метаданных и сохраняем в CSV
         df = pd.DataFrame(self.meta_data)
         df.to_csv(self.output_file, index=False)
         print(f"Новый meta файл сохранен: {self.output_file}")
 
 
 def check_photos_in_meta(video_name: str, meta_file: str) -> bool:
-    # Загружаем метаданные из CSV-файла
     try:
         meta_df = pd.read_csv(meta_file)
     except FileNotFoundError:
@@ -140,16 +134,11 @@ def check_photos_in_meta(video_name: str, meta_file: str) -> bool:
 
 
 def append_meta(meta_file, new_meta_file, output_file):
-    """Добавляет содержимое new_meta в конец meta и сохраняет результат в output_file"""
-    # Чтение двух файлов CSV
     meta_df = pd.read_csv(meta_file)
     new_meta_df = pd.read_csv(new_meta_file)
-
-    # Добавление строк из new_meta_df в meta_df
     combined_df = pd.concat([meta_df, new_meta_df], ignore_index=True)
-
-    # Сохранение результата в output_file
     combined_df.to_csv(output_file, index=False)
+
 
 if __name__ == "__main__":
     # Укажите путь к вашему meta.csv и папке с изображениями

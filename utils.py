@@ -29,7 +29,6 @@ class MetaProcessor:
         self.video_uuids = set()
 
     def process_meta(self):
-        # Чтение meta.csv с помощью pandas
         df = pd.read_csv(self.meta_file)
 
         valid_rows = []
@@ -40,16 +39,13 @@ class MetaProcessor:
             filepath = self.image_base_path / row['filepath']
             if filepath.exists():
                 valid_rows.append(row)
-                # Извлечение первого UUID из имени файла изображения
                 video_uuid = row['filepath'].split('_')[0].split('\\')[-1]
                 self.video_uuids.add(video_uuid)
             else:
                 tqdm.write(f"\nФайл не найден: {filepath}", end='')
                 undetected_files += 1
 
-        # Создание нового DataFrame с существующими файлами
         new_df = pd.DataFrame(valid_rows, columns=df.columns)
-        # Запись обратно в meta.csv
         new_df.to_csv(self.meta_file, index=False)
         print(f"Найдено {undetected_files} отсутствующих файлов")
 

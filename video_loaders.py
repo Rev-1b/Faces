@@ -1,7 +1,6 @@
 import os
 import uuid
 
-import click
 from pytubefix import YouTube
 from collections import namedtuple
 from moviepy.video.io.VideoFileClip import VideoFileClip
@@ -112,14 +111,12 @@ class PreloadedVideoDownloader(VideoDownloader):
         self.temp_dir = temp_dir
 
     def download(self, start_time=None, end_time=None):
-        # Проверяем, что папка с временными видео существует
         if not os.path.exists(self.temp_dir):
             raise FileNotFoundError(f"Папка {self.temp_dir} не найдена.")
 
         # Получаем список файлов в папке temp
         video_files = [f for f in os.listdir(self.temp_dir) if os.path.isfile(os.path.join(self.temp_dir, f))]
 
-        # Если нет видеофайлов, бросаем исключение
         if not video_files:
             raise FileNotFoundError(f"В папке {self.temp_dir} нет видео.")
 
@@ -133,7 +130,6 @@ class PreloadedVideoDownloader(VideoDownloader):
         # Переименовываем и перемещаем видео в папку назначения
         os.rename(video_path, new_video_path)
 
-        # Обрезаем видео, если указаны start_time и end_time
         if start_time is not None or end_time is not None:
             new_video_path = self.trim_video(new_video_path, start_time, end_time)
 

@@ -14,25 +14,19 @@ class FaceCleanup:
     def cleanup_faces(self):
         temp_faces_df = pd.read_csv(self.temp_csv)
 
-        # Фильтрация файлов, которые существуют в raw_faces_dir
         temp_faces_df = temp_faces_df[
             temp_faces_df['filepath'].apply(lambda x: os.path.exists(os.path.join(self.raw_faces_dir, x)))]
 
-        # Создание result_dir, если он не существует
         if not os.path.exists(self.result_dir):
             os.makedirs(self.result_dir)
 
-        # Перемещение файлов в result_dir
         for face_file in temp_faces_df['filepath']:
             shutil.move(os.path.join(self.raw_faces_dir, face_file), os.path.join(self.result_dir, face_file))
 
         # Обновление значений в столбце 'filepath' путем добавления префикса
         temp_faces_df['filepath'] = temp_faces_df['filepath'].apply(lambda x: os.path.join(self.result_dir, x))
 
-        # Обновление постоянного CSV файла
         self.update_permanent_csv(temp_faces_df)
-
-        # Удаление временного CSV файла
         os.remove(self.temp_csv)
         print("Очистка и перенос файлов завершены.")
 
