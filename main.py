@@ -3,6 +3,7 @@ import os
 import click
 
 from scripts import Config, script_list
+from utils import safe_prompt
 
 
 @click.command()
@@ -24,16 +25,14 @@ def main(normal_video_dir: str,
     config = Config(normal_video_dir, deepfake_video_dir,
                     temp_video_dir, raw_photos_dir, photos_dir,
                     permanent_csv_file, links_file)
-
-    script_name = click.prompt(
-        'Выберите, какой скрипт использовать:\n'
-        'manual - вы вручную вводите ссылку на YouTube или путь до локального видео\n'
-        'links - скрипт будет автоматически обрабатывать YouTube ссылки из файла links\n'
-        'downloaded - скрипт предназначенный для обработки видео из папки temp_videos\n',
+    script_name = safe_prompt(
+        text='\nВыберите, какой скрипт использовать:\n'
+        '  manual     - Введите ссылку на YouTube или путь до локального видео вручную\n'
+        '  links      - Автоматическая обработка YouTube ссылок из файла links\n'
+        '  downloaded - Обработка видео из папки temp_videos\n',
         type=click.Choice(script_list.keys(), case_sensitive=False),
         default='manual',
-        show_default=True,
-        show_choices=True
+        show_choices=False,
     )
     script = script_list[script_name](config)
     script.execute_script()

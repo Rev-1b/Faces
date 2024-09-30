@@ -2,11 +2,12 @@ import os
 import uuid
 
 import cv2
-import face_recognition
 import pandas as pd
 from PIL import Image
 from facenet_pytorch import MTCNN
 from time import sleep
+
+from tqdm import tqdm
 
 
 class SaveMixin:
@@ -20,9 +21,9 @@ class SaveMixin:
         return face_filename
 
 
-class BaseExtractor:
+class BaseExtractor(SaveMixin):
     def __init__(self, video_path: str, video_name: str, output_dir: str, deepfake: bool, crop_image: bool = False,
-                 frame_skip: int = 10) -> int:
+                 frame_skip: int = 10):
         self.crop_image = crop_image
         self.video_name = video_name
         self.frame_skip = frame_skip
@@ -39,19 +40,23 @@ class BaseExtractor:
         if self.crop_image:
             print('Изображение будет обрезано')
 
-        while True:
-            ret, frame = video_capture.read()
-            if not ret:
-                print("Все кадры обработаны, завершаем.")
-                break
-            if frame_count % self.frame_skip == 0:
+        with tqdm(total=total_frames, desc="Обработка кадров", unit="кадров") as pbar:
+            while True:
+                ret, frame = video_capture.read()
+                if not ret:
+                    print("Все кадры обработаны, завершаем.")
+                    break
 
-                if self.is_deepfake is True and self.crop_image is True:
-                    frame = self.get_right_half(frame)
+                if frame_count % self.frame_skip == 0:
+                    if self.is_deepfake and self.crop_image:
+                        frame = self.get_right_half(frame)
 
-                total_faces = self.on_frame(total_frames, frame_count, total_faces, frame)
+                    total_faces = self.on_frame(total_frames, frame_count, total_faces, frame)
+                    pbar.set_postfix({'Найдено лиц': total_faces})
 
-            frame_count += 1
+                frame_count += 1
+                pbar.update(1)
+
         video_capture.release()
 
     def on_frame(self, total_frames, frame_count, total_faces, frame):
@@ -59,13 +64,8 @@ class BaseExtractor:
 
     @staticmethod
     def get_right_half(frame):
-        # Определяем ширину кадра
         width = frame.shape[1]
-
-        # Обрезаем кадр, оставляя только правую половину
-        right_half = frame[:, width // 2:]
-
-        return right_half
+        return frame[:, width // 2:]
 
     @staticmethod
     def adjust_face_size(frame, face_location):
@@ -96,14 +96,9 @@ class BaseExtractor:
         print("Обработка видео завершена.")
 
 
-class HaarcascadesExtractor(BaseExtractor, SaveMixin):
-    """
-    Наименее точный способ определения, однако за счет использования двойной валидации работает намного лучше остальных.
-    Также выдает изображения в виде квадрата. Предпочтительный extractor
-    """
-
+class HaarcascadesExtractor(BaseExtractor):
     def __init__(self, video_path: str, video_name: str, output_dir: str, deepfake: bool, crop_image: bool = False,
-                 frame_skip: int = 7) -> int:
+                 frame_skip: int = 7):
         super().__init__(video_path, video_name, output_dir, deepfake, crop_image, frame_skip)
         self.face_classifier = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 
@@ -120,10 +115,8 @@ class HaarcascadesExtractor(BaseExtractor, SaveMixin):
             face_filename = self.save(face_image, self.video_name, self.output_dir)
             self.record_face_data(face_filename)
 
-            total_faces += len(face_locations)
-            sleep(0.35)
+            total_faces += 1
 
-        print(f"\rОбработано кадров: {frame_count}/{total_frames}, Найдено лиц: {total_faces}", end="")
         return total_faces
 
     def extract_faces_from_frame(self, frame):
@@ -132,7 +125,7 @@ class HaarcascadesExtractor(BaseExtractor, SaveMixin):
             gray_img,
             scaleFactor=1.1,
             minNeighbors=5,
-            minSize=(30, 30)
+            minSize=(30, 30)  # ПОПРАВИТЬ
         )
         return faces  # возвращает список лиц в формате (x, y, w, h)
 
@@ -146,75 +139,3 @@ class HaarcascadesExtractor(BaseExtractor, SaveMixin):
         new_y = max(y - int((new_h - h) / 2), 0)
 
         return frame[new_y:new_y + new_h, new_x:new_x + new_w] if new_w >= 200 and new_h >= 200 else None
-
-
-class FaceRecognitionExtractor(BaseExtractor, SaveMixin):
-    """
-    Очень точный, но не может работать с видео в высоком качестве, как минимум на моем железе
-    """
-
-    def on_frame(self, total_frames, frame_count, total_faces, frame):
-        frame = self.get_cropped_frame(frame)
-        face_locations = self.extract_faces_from_frame(frame)
-        for face_location in face_locations:
-            face_image = self.adjust_face_size(frame, face_location)
-            face_filename = self.save(face_image, self.video_name, self.output_dir)
-            self.record_face_data(face_filename)
-
-        total_faces += len(face_locations)
-        print(f"\rОбработано кадров: {frame_count}/{total_frames}, Найдено лиц: {total_faces}", end="")
-
-        return total_faces
-
-    @staticmethod
-    def get_cropped_frame(frame):
-        height, width = frame.shape[:2]
-        center_x, center_y = width // 2, height // 2
-        new_width, new_height = width // 1.8, height // 1.8
-        left = int(max(center_x - new_width // 2, 0))
-        top = int(max(center_y - new_height // 2, 0))
-        right = int(min(center_x + new_width // 2, width))
-        bottom = int(min(center_y + new_height // 2, height))
-
-        return frame[top:bottom, left:right]
-
-    @staticmethod
-    def extract_faces_from_frame(frame):
-        rgb_frame = frame[:, :, ::-1]
-        return face_recognition.face_locations(rgb_frame)
-
-
-class DeepFaceExtractor(BaseExtractor, SaveMixin):
-    """
-    Неудачная попытка обхитрить систему. Медленнее остальных в 3-4 раза, однако почти не нагружает процессор
-    """
-
-    def __init__(self, video_path: str, video_name: str, output_dir: str, deepfake: bool, frame_skip: int = 5) -> int:
-        super().__init__(video_path, video_name, output_dir, deepfake, frame_skip)
-        self.mtcnn = MTCNN()
-
-    def on_frame(self, total_frames, frame_count, total_faces, frame):
-        face_images = self.extract_faces_from_frame(frame)
-        for face_image in face_images:
-            face_filename = self.save(face_image, self.video_name, self.output_dir)
-            self.record_face_data(face_filename)
-
-        total_faces += len(face_images)
-        print(f"\rОбработано кадров: {frame_count}/{total_frames}, Найдено лиц: {total_faces}", end="")
-
-        return total_faces
-
-    def extract_faces_from_frame(self, frame):
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        pil_image = Image.fromarray(rgb_frame)
-        boxes, _ = self.mtcnn.detect(pil_image)
-
-        face_images = []
-        if boxes is not None:
-            for box in boxes:
-                x1, y1, x2, y2 = map(int, box)
-                face_image = self.adjust_face_size(frame, (y1, x2, y2, x1))
-                if face_image.size == 0:
-                    continue
-                face_images.append(face_image)
-        return face_images

@@ -1,6 +1,6 @@
 import os
 import platform
-import tempfile
+import troubleshooting
 import uuid
 from collections import namedtuple
 
@@ -39,7 +39,7 @@ class BaseScript:
         face_extractor.save_face_data(temp_csv_file)
 
         self.open_folder(self.config.raw_photos_dir)
-        safe_prompt("Удалите ненужные изображения из папки raw_faces")
+        safe_prompt("Удалите ненужные изображения из папки raw_faces", default='')
 
         folder = self.choose_folder()
         full_output_dir = os.path.join(self.config.photos_dir, folder)
@@ -70,8 +70,8 @@ class BaseScript:
             '6': os.path.join('women', 'asian'),
         }
         folder_choice = safe_prompt(
-            f'Выбери папку для сохранения изображений: \n'
-            f'{(f"{key} - {value}\n" for key, value in folders.items())}',
+            text=f'\nВыбери папку для сохранения изображений: \n'
+            f'{('\n'.join(f"{key} - {value}\n" for key, value in folders.items()))}',
             type=str
         )
         return folders.get(folder_choice)
@@ -80,19 +80,20 @@ class BaseScript:
 class ManualInput(BaseScript):
     def execute_script(self):
         is_deepfake = safe_prompt(
-            text='Выберите, видео какого типа вы будете обрабатывать',
+            text='\nВыберите, видео какого типа вы будете обрабатывать',
             type=click.Choice(['Deepfake', 'Normal'], case_sensitive=False),
             default='Deepfake'
         ) == 'Deepfake'
 
         constant_frame_skip = safe_prompt(
-            text='Выберите, сколько кадров будет пропускаться у обрабатываемых видео.\n'
-                 'Если вы хотите указывать количество пропускаемых кадров для каждого видео\n'
+            text='\nВыберите, сколько кадров будет пропускаться у обрабатываемых видео.\n'
+                 'Если вы хотите указывать количество пропускаемых кадров для каждого видео '
                  'индивидуально, оставьте пустой строку ввода',
-            type=int,
-            default=None,
+            type=str,
+            default='',
             show_default=False,
         )
+        constant_frame_skip = int(constant_frame_skip) if constant_frame_skip.isdigit() else None
 
         while True:
             temp_csv_file = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4()}.csv")
@@ -127,7 +128,7 @@ class ManualInput(BaseScript):
     @staticmethod
     def choose_video_downloader(video_dir):
         choice = safe_prompt(
-            'Выберите источник видео',
+            '\nВыберите источник видео',
             type=click.Choice(['Youtube', 'Local'], case_sensitive=False),
             show_choices=True,
             default='Youtube'
